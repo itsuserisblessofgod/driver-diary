@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Дневник смен водителя</title>
+<style>
+  :root { --road:#2a2e32; --paper:#eef0ec; --ink:#1c201e; --faded:#5b635f; --rule:#aab0aa; --taxi:#f2c230; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--road); color:var(--ink);
+         font:15px/1.5 ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-variant-numeric:tabular-nums; }
+  main { max-width:400px; margin:0 auto; padding:16px; }
+  nav { display:flex; gap:8px; margin-bottom:16px; }
+  nav button, nav input { font:inherit; border:0; border-radius:4px; padding:10px 14px; }
+  nav button { background:var(--taxi); color:var(--ink); font-weight:700; cursor:pointer; }
+  nav input { flex:1; min-width:0; text-align:center; background:var(--paper); color:var(--ink); }
+  nav :focus-visible { outline:3px solid #fff; outline-offset:2px; }
+  .receipt { background:var(--paper); padding:20px 18px 28px; }
+  h1 { margin:0 0 16px; font-size:17px; text-align:center; }
+  .line { display:flex; justify-content:space-between; gap:12px; }
+  .line.faded { font-size:13px; margin-bottom:10px; }
+  .faded { color:var(--faded); }
+  .rule { border-top:1px dashed var(--rule); margin:14px 0; }
+  .total { margin-top:12px; padding:8px 10px; background:var(--taxi); font-size:20px; font-weight:700; }
+</style>
+</head>
+<body>
+<main>
+  <nav>
+    <button id="prev" aria-label="Предыдущий день">←</button>
+    <input id="day" type="date" aria-label="День">
+    <button id="next" aria-label="Следующий день">→</button>
+  </nav>
+  <article class="receipt">
+    <h1 id="title"></h1>
+    <div id="summary"></div>
+    <div class="rule"></div>
+    <div id="trips"></div>
+  </article>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+const fmt = n => n.toLocaleString("ru-RU");
+const LABEL = { cash: "Наличные", card: "Карта" };
+const line = (a, b, cls = "") => `<div class="line ${cls}"><span>${a}</span><span>${b}</span></div>`;
+const shift = (day, n) => {
+  const d = new Date(day + "T00:00:00Z");
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
+};
+let seq = 0;
+
+async function show(day) {
+  const mine = ++seq;
+  $("day").value = day;
+  const [s, trips] = await Promise.all(
+    ["summary", "trips"].map(p => fetch(`/api/${p}?date=${day}`).then(r => r.json())));
+  if (mine !== seq) return; // a newer click won
+  $("title").textContent = new Date(day + "T00:00:00Z").toLocaleDateString("ru-RU",
+    { weekday: "long", day: "numeric", month: "long", year: "numeric", timeZone: "UTC" });
+  $("summary").innerHTML =
+    line("Поездки", s.trips) + line("Выручка", fmt(s.revenue)) + line("Комиссия", "−" + fmt(s.commission)) +
+    `<div class="rule"></div>` +
+    Object.entries(s.by_payment).map(([k, p]) => line(`${LABEL[k]} ×${p.trips}`, fmt(p.revenue))).join("") +
+    line("На руки", fmt(s.net), "total");
+  // the API returns times in the driver's timezone: show them as they are
+  $("trips").innerHTML = trips.length
+    ? trips.map(t => line(`${t.start.slice(11, 16)}–${t.end.slice(11, 16)} ${LABEL[t.payment]}`, fmt(t.amount)) +
+        line("комиссия", "−" + fmt(t.commission), "faded")).join("")
+    : `<p class="faded">Поездок за этот день нет — выберите другой день.</p>`;
+}
+
+$("prev").onclick = () => show(shift($("day").value, -1));
+$("next").onclick = () => show(shift($("day").value, 1));
+$("day").onchange = e => e.target.value && show(e.target.value);
+fetch("/api/days").then(r => r.json()).then(d => show(d[0] || new Date().toISOString().slice(0, 10)));
+</script>
+</body>
+</html>
